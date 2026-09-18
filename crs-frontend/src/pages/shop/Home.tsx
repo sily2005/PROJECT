@@ -26,20 +26,24 @@ export function Home() {
   const { saveCoupon, isCouponSaved } = useApp()
 
   useEffect(() => {
-    fetchCoupons()
-      .then((res) => {
-        const list = Array.isArray(res) ? res : res?.data ?? []
-        setApiCoupons(list)
-      })
-      .catch(() => {})
+    let mounted = true
+    Promise.all([
+      fetchCoupons().catch(() => []),
+      fetchProducts({ per_page: 50 }).catch(() => [])
+    ]).then(([couponsRes, prodsRes]) => {
+      if (!mounted) return
+      const cList = Array.isArray(couponsRes) ? couponsRes : (couponsRes?.data ?? [])
+      setApiCoupons(cList)
 
-    fetchProducts({ per_page: 20 })
-      .then((prods) => {
-        if (Array.isArray(prods)) {
-          setHomeProducts(prods.filter((p) => p.isActive !== false && p.status !== 'inactive'))
-        }
-      })
-      .catch(() => {})
+      const pList = Array.isArray(prodsRes) ? prodsRes : (prodsRes?.data ?? [])
+      if (pList.length > 0) {
+        setHomeProducts(pList.filter((p: Product) => p.isActive !== false && p.status !== 'inactive'))
+      }
+    })
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   const handleCopyCode = (code: string) => {
@@ -57,16 +61,6 @@ export function Home() {
 
   // Dynamically load active vouchers for showcase
   const activeCouponsList: Coupon[] = useMemo(() => {
-    const stored = localStorage.getItem('crs_admin_vouchers')
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as Coupon[]
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const active = parsed.filter((c) => c.isActive !== false)
-          if (active.length > 0) return active.slice(0, 3)
-        }
-      } catch {}
-    }
     return apiCoupons.filter((c) => c.isActive !== false).slice(0, 3)
   }, [apiCoupons])
 

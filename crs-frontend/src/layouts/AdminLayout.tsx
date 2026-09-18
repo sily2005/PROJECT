@@ -88,8 +88,8 @@ export const AdminLayout: React.FC = () => {
     },
     {
       id: 4,
-      title: 'Hệ thống VietQR hoạt động ổn định',
-      desc: 'Tự động kiểm tra webhook thanh toán chuyển khoản thành công',
+      title: 'Cổng thanh toán MoMo hoạt động ổn định',
+      desc: 'Hệ thống thanh toán trực tuyến MoMo và COD sẵn sàng xử lý đơn hàng',
       time: '1 ngày trước',
       type: 'system',
       unread: false,

@@ -47,6 +47,7 @@ export type Product = {
   sizes: string[]
   variants?: ProductVariant[]
   isActive?: boolean
+  is_active?: boolean
   status?: 'active' | 'inactive'
   is_deleted?: boolean
   isDeleted?: boolean
@@ -117,10 +118,14 @@ export type User = {
   name: string
   email: string
   phone?: string
+  phone_number?: string
   role: Role
   avatar?: string
   addresses?: Address[]
   createdAt?: string
+  current_password?: string
+  password?: string
+  new_password?: string
 }
 
 export type Order = {
@@ -164,6 +169,7 @@ export type Customer = {
   ordersCount: number
   totalSpent: number
   createdAt?: string
+  registeredAt?: string
   status: 'active' | 'blocked'
 }
 
@@ -176,6 +182,7 @@ export type BannerSlide = {
   order?: number
   tag?: string
   isActive: boolean
+  is_active?: boolean
 }
 
 export type ShopSettings = {
@@ -187,6 +194,7 @@ export type ShopSettings = {
   address: string
   workingHours: string
   warrantyPolicy?: string
+  copyright?: string
   bankName?: string
   bankAccountNo?: string
   bankAccountName?: string

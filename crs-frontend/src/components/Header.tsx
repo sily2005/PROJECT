@@ -29,31 +29,19 @@ export function Header() {
     const [activeDropdown, setActiveDropdown] = useState<string | null>(null)
     const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const navigate = useNavigate()
-    const [categoriesList, setCategoriesList] = useState<CategoryItem[]>([
-        { id: 1, name: 'Giày bóng đá', slug: 'giay-bong-da' },
-        { id: 2, name: 'Áo đấu', slug: 'ao-dau' },
-        { id: 3, name: 'Bóng thi đấu', slug: 'bong-thi-dau' },
-        { id: 4, name: 'Phụ kiện', slug: 'phu-kien' },
-    ])
-    const [brandsList, setBrandsList] = useState<BrandItem[]>([
-        { id: 1, name: 'Nike' },
-        { id: 2, name: 'Adidas' },
-        { id: 3, name: 'Puma' },
-        { id: 4, name: 'Mizuno' },
-    ])
+    const [categoriesList, setCategoriesList] = useState<CategoryItem[]>([])
+    const [brandsList, setBrandsList] = useState<BrandItem[]>([])
 
-    // Load from API on mount as progressive enhancement
+    // Load dynamic categories & brands from API on mount
     useEffect(() => {
         let active = true
-        Promise.allSettled([fetchCategories(), fetchBrands()]).then(([cats, brs]) => {
-            if (!active) return
-            if (cats.status === 'fulfilled' && Array.isArray(cats.value) && cats.value.length > 0) {
-                setCategoriesList(cats.value)
-            }
-            if (brs.status === 'fulfilled' && Array.isArray(brs.value) && brs.value.length > 0) {
-                setBrandsList(brs.value)
-            }
-        }).catch(console.error)
+        Promise.all([fetchCategories(), fetchBrands()])
+            .then(([cats, brands]) => {
+                if (!active) return
+                if (Array.isArray(cats)) setCategoriesList(cats)
+                if (Array.isArray(brands)) setBrandsList(brands)
+            })
+            .catch(console.error)
         return () => {
             active = false
         }

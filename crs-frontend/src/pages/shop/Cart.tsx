@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -41,11 +41,12 @@ export function Cart() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    fetchProducts({ per_page: 10 }).then((prods) => {
-      if (Array.isArray(prods)) {
-        setRecommendations(prods.filter((p) => p.isActive !== false && p.status !== 'inactive'))
-      }
-    }).catch(() => {})
+    fetchProducts({ per_page: 8 })
+      .then((res: any) => {
+        const list: Product[] = Array.isArray(res) ? res : (res?.data ?? [])
+        setRecommendations(list)
+      })
+      .catch(() => {})
   }, [])
 
   const allSelected = cart.length > 0 && cart.every((item) => item.selected !== false)
@@ -76,7 +77,7 @@ export function Cart() {
     }
   }
 
-  const upsellProducts = recommendations.filter((p) => !cart.some((c) => c.id === p.id)).slice(0, 4)
+  const upsellProducts = recommendations.filter((p: Product) => !cart.some((c) => c.id === p.id)).slice(0, 4)
 
   return (
     <section className="min-h-screen bg-[#0B0E17] px-5 py-12 text-white lg:px-8">

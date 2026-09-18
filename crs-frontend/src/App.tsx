@@ -4,7 +4,6 @@ import { Toaster } from 'sonner'
 import { AppProvider, useApp } from './context/AppContext'
 import { ShopLayout } from './layouts/ShopLayout'
 import { AdminLayout } from './layouts/AdminLayout'
-import { Toast } from './components/Toast'
 
 // Trang phía Khách hàng
 import { Home } from './pages/shop/Home'
@@ -191,7 +190,6 @@ export default function App() {
                         <Route path="/admin/*" element={<AdminApp />} />
                         <Route path="*" element={<UserApp />} />
                     </Routes>
-                    <Toast />
                     <Toaster
                         position="top-right"
                         richColors

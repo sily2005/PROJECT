@@ -58,22 +58,8 @@ function matchCategoryFromQuery(value: string | null, dynamicCats: string[]): st
 export function Shop() {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [shopCategories, setShopCategories] = useState<string[]>([
-    'Tất cả',
-    'Giày bóng đá',
-    'Áo đấu',
-    'Bóng thi đấu',
-    'Phụ kiện'
-  ])
-
-  const [shopBrands, setShopBrands] = useState<string[]>([
-    'Tất cả thương hiệu',
-    'Nike',
-    'Adidas',
-    'Puma',
-    'Mizuno'
-  ])
-
+  const [shopCategories, setShopCategories] = useState<string[]>(['Tất cả'])
+  const [shopBrands, setShopBrands] = useState<string[]>(['Tất cả thương hiệu'])
   const [catalog, setCatalog] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [offline, setOffline] = useState(false)
@@ -83,6 +69,49 @@ export function Shop() {
   const [sort, setSort] = useState('featured')
   const [priceRange, setPriceRange] = useState<'all' | 'under1m' | '1m-3m' | 'above3m'>('all')
   const [filterOpen, setFilterOpen] = useState(false)
+
+  // Load categories & brands & products from API
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      fetchCategories().catch(() => []),
+      fetchBrands().catch(() => []),
+      fetchProducts({ per_page: 100 }).catch(() => [])
+    ]).then(([cats, brands, prods]) => {
+      if (!active) return
+
+      if (Array.isArray(cats) && cats.length > 0) {
+        setShopCategories(['Tất cả', ...cats.map((c: any) => (typeof c === 'string' ? c : c.name))])
+      }
+      if (Array.isArray(brands) && brands.length > 0) {
+        setShopBrands(['Tất cả thương hiệu', ...brands.map((b: any) => (typeof b === 'string' ? b : b.name))])
+      }
+
+      const pList: any[] = Array.isArray(prods) ? prods : (prods?.data ?? [])
+      if (pList.length > 0) {
+        setCatalog(
+          pList.map((item: any) => ({
+            ...item,
+            category: item.category?.name ?? item.category ?? 'Khác',
+            image: item.image_url ?? item.image ?? '',
+            colors: item.colors ?? ['Black'],
+            sizes: item.sizes ?? ['40', '41'],
+            description: item.description ?? 'Thiết bị bóng đá chính hãng.',
+          }))
+        )
+      }
+      setLoading(false)
+    }).catch(() => {
+      if (active) {
+        setOffline(true)
+        setLoading(false)
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Listen to searchParams changes (e.g. from Header links or browser back/forward)
   useEffect(() => {
@@ -99,39 +128,6 @@ export function Shop() {
       setPriceRange('all')
     }
   }, [searchParams, shopCategories])
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-
-    Promise.allSettled([
-      fetchProducts({ per_page: 100 }),
-      fetchCategories(),
-      fetchBrands(),
-    ]).then(([prodsRes, catsRes, brandsRes]) => {
-      if (!active) return
-
-      if (prodsRes.status === 'fulfilled' && Array.isArray(prodsRes.value)) {
-        setCatalog(prodsRes.value)
-      }
-
-      if (catsRes.status === 'fulfilled' && Array.isArray(catsRes.value) && catsRes.value.length > 0) {
-        setShopCategories(['Tất cả', ...catsRes.value.map((c: any) => c.name)])
-      }
-
-      if (brandsRes.status === 'fulfilled' && Array.isArray(brandsRes.value) && brandsRes.value.length > 0) {
-        setShopBrands(['Tất cả thương hiệu', ...brandsRes.value.map((b: any) => b.name)])
-      }
-    }).catch(() => {
-      if (active) setOffline(true)
-    }).finally(() => {
-      if (active) setLoading(false)
-    })
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   const filtered = useMemo(() => {
     return catalog

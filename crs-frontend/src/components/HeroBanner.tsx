@@ -1,37 +1,32 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Zap } from 'lucide-react'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { INITIAL_BANNER_SLIDES } from '../data/adminMockData'
+import { fetchBanners } from '../services/banners'
 import type { BannerSlide } from '../types'
 
 export function HeroBanner() {
-  // Load dynamic active banners from localStorage or INITIAL_BANNER_SLIDES
-  const slides: BannerSlide[] = useMemo(() => {
-    const stored = localStorage.getItem('crs_banners')
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as BannerSlide[]
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const activeList = parsed.filter((b) => b.isActive !== false)
-          if (activeList.length > 0) {
-            return activeList.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-          }
-        }
-      } catch {}
-    }
-    return INITIAL_BANNER_SLIDES.filter((b) => b.isActive !== false)
-  }, [])
-
+  const [slides, setSlides] = useState<BannerSlide[]>([])
   const [active, setActive] = useState(0)
 
-  // Listen to storage changes from admin
   useEffect(() => {
-    const handleStorage = () => {
-      setActive(0)
+    let mounted = true
+    const load = () => {
+      fetchBanners({ active_only: true })
+        .then((data) => {
+          if (mounted && Array.isArray(data) && data.length > 0) {
+            setSlides(data)
+          }
+        })
+        .catch(console.error)
     }
-    window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
+
+    load()
+    window.addEventListener('banners-changed', load)
+    return () => {
+      mounted = false
+      window.removeEventListener('banners-changed', load)
+    }
   }, [])
 
   useEffect(() => {
@@ -43,8 +38,10 @@ export function HeroBanner() {
     return () => window.clearInterval(timer)
   }, [slides.length])
 
+  if (slides.length === 0) return null
+
   // Safe fallback if active index is out of bounds
-  const currentSlide = slides[active] || slides[0] || INITIAL_BANNER_SLIDES[0]
+  const currentSlide = slides[active] || slides[0]
 
   return (
     <section className="relative min-h-[640px] lg:min-h-[720px] overflow-hidden bg-[#0B0E17]">

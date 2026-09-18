@@ -63,16 +63,13 @@ export const Orders: React.FC = () => {
 
   // Helper: Determine combined payment method & collection status badge
   const getPaymentBadge = (order: Order): { isPaid: boolean; label: string; className: string } => {
-    const isCOD = order.paymentMethod === 'cod';
     const isMoMo = order.paymentMethod === 'momo';
-    const methodLabel = isMoMo ? 'MoMo' : order.paymentMethod === 'bank_transfer' ? 'VietQR' : 'COD';
     
     // Delivered COD or Online gateway or explicitly marked paid
     const isPaid = 
       order.paymentStatus === 'paid' || 
-      order.status === 'delivered' ||
-      order.status === 'paid' ||
-      (!isCOD && order.paymentStatus !== 'unpaid' && order.paymentStatus !== 'failed');
+      order.status === 'delivered' || 
+      order.status === 'paid';
 
     if (isMoMo) {
       return {
@@ -84,23 +81,13 @@ export const Orders: React.FC = () => {
       };
     }
 
-    if (isCOD) {
-      return {
-        isPaid,
-        label: isPaid ? 'COD • Đã thu' : 'COD • Chưa thu',
-        className: isPaid 
-          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-          : 'bg-zinc-800 text-amber-400 border-zinc-700'
-      };
-    } else {
-      return {
-        isPaid,
-        label: isPaid ? `${methodLabel} • Đã trả` : `${methodLabel} • Chưa trả`,
-        className: isPaid 
-          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-          : 'bg-zinc-800 text-amber-400 border-zinc-700'
-      };
-    }
+    return {
+      isPaid,
+      label: isPaid ? 'COD • Đã thu tiền' : 'COD • Chưa thu',
+      className: isPaid 
+        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-bold' 
+        : 'bg-zinc-800 text-amber-400 border-zinc-700'
+    };
   };
 
   // Filtered Orders (Filtered strictly by 5 shipping status keys: ALL, pending, shipping, delivered, cancelled)
@@ -125,9 +112,9 @@ export const Orders: React.FC = () => {
     });
   }, [localOrders, statusFilter, searchQuery]);
 
-  // Statistics KPI
+  // Statistics KPI - Doanh thu chỉ tính đơn đã giao / đã thanh toán thành công
   const totalRevenue = useMemo(
-    () => localOrders.filter((o) => o.status !== 'cancelled').reduce((sum, o) => sum + o.total, 0),
+    () => localOrders.filter((o) => (o.status === 'delivered' || o.status === 'paid' || o.paymentStatus === 'paid') && o.status !== 'cancelled').reduce((sum, o) => sum + o.total, 0),
     [localOrders]
   );
   const pendingCount = useMemo(() => localOrders.filter((o) => o.status === 'pending').length, [localOrders]);
@@ -280,7 +267,7 @@ export const Orders: React.FC = () => {
             Quản Lý Đơn Hàng
           </h1>
           <p className="text-xs text-zinc-400 mt-1 font-mono">
-            Tổng giá trị đơn: <b className="text-lime-400">{totalRevenue.toLocaleString('vi-VN')}₫</b> •{' '}
+            Doanh thu đã giao: <b className="text-lime-400">{totalRevenue.toLocaleString('vi-VN')}₫</b> •{' '}
             <b className="text-white">{localOrders.length}</b> đơn hàng.
           </p>
         </div>

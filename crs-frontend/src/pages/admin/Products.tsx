@@ -14,19 +14,21 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { 
-  fetchProducts, 
-  fetchCategories, 
-  fetchBrands, 
-  createProduct, 
-  updateProduct, 
-  deleteProduct 
-} from '../../services/catalog';
+import { fetchProducts, createProduct, updateProduct, deleteProduct, fetchCategories, fetchBrands } from '../../services/catalog';
 import type { Product, ProductVariant, CategoryItem, BrandItem } from '../../types';
 
-// System default fallback items
-const DEFAULT_CATEGORY: CategoryItem = { id: 999, name: 'Khác', slug: 'khac' };
-const DEFAULT_BRAND: BrandItem = { id: 999, name: 'Khác' };
+export const DEFAULT_CATEGORY: CategoryItem = {
+  id: 999,
+  name: 'Khác',
+  description: 'Danh mục mặc định của hệ thống',
+  slug: 'khac',
+};
+
+export const DEFAULT_BRAND: BrandItem = {
+  id: 999,
+  name: 'Khác',
+  description: 'Thương hiệu mặc định của hệ thống',
+};
 
 // Helpers to identify and ensure system default items
 const isDefaultCategory = (c?: CategoryItem | null): boolean => {
@@ -70,11 +72,52 @@ const COLOR_PRESETS = [
 ];
 
 export const Products: React.FC = () => {
-  // Categories, Brands & Products state loaded from API
-  const [categoriesList, setCategoriesList] = useState<CategoryItem[]>([]);
-  const [brandsList, setBrandsList] = useState<BrandItem[]>([]);
+  const [categoriesList, setCategoriesList] = useState<CategoryItem[]>([DEFAULT_CATEGORY]);
+  const [brandsList, setBrandsList] = useState<BrandItem[]>([DEFAULT_BRAND]);
   const [productsList, setProductsList] = useState<Product[]>([]);
-  const [, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [catsRes, brandsRes, prodsRes] = await Promise.all([
+        fetchCategories().catch(() => []),
+        fetchBrands().catch(() => []),
+        fetchProducts({ per_page: 100 }).catch(() => [])
+      ]);
+
+      if (Array.isArray(catsRes) && catsRes.length > 0) {
+        setCategoriesList(ensureDefaultCategory(catsRes));
+      }
+      if (Array.isArray(brandsRes) && brandsRes.length > 0) {
+        setBrandsList(ensureDefaultBrand(brandsRes));
+      }
+
+      const pRaw: any[] = Array.isArray(prodsRes) ? prodsRes : (prodsRes?.data ?? []);
+      if (Array.isArray(pRaw)) {
+        setProductsList(
+          pRaw.map((p: any) => ({
+            ...p,
+            category: p.category?.name ?? p.category ?? 'Khác',
+            brand: p.brand?.name ?? p.brand ?? 'Khác',
+            image: p.image_url ?? p.image ?? '',
+            sizes: p.sizes ?? ['40', '41', '42'],
+            colors: p.colors ?? ['Volt', 'Black'],
+            isActive: Boolean(p.is_active ?? p.isActive ?? true),
+            status: (p.is_active === false || p.status === 'inactive') ? 'inactive' : 'active',
+          }))
+        );
+      }
+    } catch (err) {
+      console.error('Lỗi tải sản phẩm:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tất cả');
@@ -111,36 +154,25 @@ export const Products: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch real categories, brands and products from catalog API
+  // Persist products to localStorage
   useEffect(() => {
-    let isMounted = true;
+    localStorage.setItem('crs_admin_products', JSON.stringify(productsList));
+  }, [productsList]);
 
-    async function loadCatalogData() {
-      setIsLoading(true);
-      try {
-        const [cats, brs, prods] = await Promise.all([
-          fetchCategories().catch(() => []),
-          fetchBrands().catch(() => []),
-          fetchProducts({ per_page: 100 }).catch(() => []),
-        ]);
-
-        if (!isMounted) return;
-        setCategoriesList(ensureDefaultCategory(cats));
-        setBrandsList(ensureDefaultBrand(brs));
-        setProductsList(prods);
-      } catch (err) {
-        console.error('Lỗi khi tải dữ liệu sản phẩm từ API:', err);
-        toast.error('Không thể tải danh sách sản phẩm từ máy chủ.');
-      } finally {
-        if (isMounted) setIsLoading(false);
+  // Sync categories & brands on storage change or mount
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const storedCats = localStorage.getItem('crs_categories');
+      if (storedCats) {
+        try { setCategoriesList(ensureDefaultCategory(JSON.parse(storedCats))); } catch {}
       }
-    }
-
-    loadCatalogData();
-
-    return () => {
-      isMounted = false;
+      const storedBrands = localStorage.getItem('crs_brands');
+      if (storedBrands) {
+        try { setBrandsList(ensureDefaultBrand(JSON.parse(storedBrands))); } catch {}
+      }
     };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Total Stock calculated dynamically from all variants
@@ -342,8 +374,8 @@ export const Products: React.FC = () => {
     return op > 0 && op <= p;
   }, [formPrice, formOldPrice]);
 
-  // Save Product (Create or Update via API)
-  const handleSaveProduct = async (e: React.FormEvent) => {
+  // Save Product (Create or Update)
+  const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       toast.error('Vui lòng nhập tên sản phẩm!');
@@ -392,44 +424,53 @@ export const Products: React.FC = () => {
       variants: formVariants,
     };
 
-    try {
-      if (editingProduct) {
-        // Update via API
-        const updated = await updateProduct(editingProduct.id, {
-          ...payload,
-          isActive: editingProduct.isActive !== undefined ? editingProduct.isActive : true,
+    if (editingProduct) {
+      // Update in API
+      updateProduct(editingProduct.id, payload)
+        .then((updated) => {
+          setProductsList((prev) =>
+            prev.map((p) => (p.id === editingProduct.id ? { ...p, ...payload, ...updated } : p))
+          );
+          toast.success(`Đã cập nhật sản phẩm "${formName}" thành công!`);
+        })
+        .catch(() => {
+          toast.error('Lỗi khi cập nhật sản phẩm trên máy chủ.');
         });
-        setProductsList((prev) =>
-          prev.map((p) => (p.id === editingProduct.id ? updated : p))
-        );
-        toast.success(`Đã cập nhật sản phẩm "${formName}" thành công!`);
-      } else {
-        // Create new via API
-        const created = await createProduct({
-          ...payload,
-          isActive: true,
-          status: 'active',
+    } else {
+      // Create new in API
+      createProduct(payload)
+        .then((created) => {
+          const newProduct: Product = {
+            id: created.id || Date.now(),
+            ...payload,
+            ...created,
+            isActive: true,
+            status: 'active',
+          };
+          setProductsList((prev) => [newProduct, ...prev]);
+          toast.success(`Đã thêm sản phẩm "${formName}" vào kho hàng!`);
+        })
+        .catch(() => {
+          toast.error('Lỗi khi tạo mới sản phẩm trên máy chủ.');
         });
-        setProductsList((prev) => [created, ...prev]);
-        toast.success(`Đã thêm sản phẩm "${formName}" vào kho hàng!`);
-      }
-      setModalOpen(false);
-    } catch (err: any) {
-      console.error('Lỗi khi lưu sản phẩm:', err);
-      toast.error(err?.response?.data?.message || 'Không thể lưu sản phẩm. Vui lòng thử lại!');
     }
+
+    setModalOpen(false);
   };
 
-  // Toggle Active State via API
+  // Toggle Active State (Fast Click from table badge)
   const handleToggleActive = async (id: number) => {
-    const target = productsList.find((p) => p.id === id);
-    if (!target) return;
-    const nextActive = target.isActive === false;
+    const current = productsList.find((p) => p.id === id);
+    if (!current) return;
+    const nextActive = current.isActive === false ? true : false;
     try {
-      await updateProduct(id, { isActive: nextActive });
+      await updateProduct(id, { is_active: nextActive, status: nextActive ? 'active' : 'inactive' });
       setProductsList((prev) =>
         prev.map((p) => {
           if (p.id === id) {
+            toast.info(
+              `Đã chuyển sang trạng thái: [${nextActive ? 'Đang bán' : 'Ngừng kinh doanh'}]`
+            );
             return { 
               ...p, 
               isActive: nextActive, 
@@ -439,15 +480,12 @@ export const Products: React.FC = () => {
           return p;
         })
       );
-      toast.info(
-        `Đã chuyển sang trạng thái: [${nextActive ? 'Đang bán' : 'Ngừng kinh doanh'}]`
-      );
-    } catch (err) {
+    } catch {
       toast.error('Không thể cập nhật trạng thái sản phẩm trên máy chủ.');
     }
   };
 
-  // Soft Delete Product via API
+  // Soft Delete Product in API
   const handleSoftDelete = async (id: number, name: string) => {
     if (window.confirm(`Bạn có chắc chắn muốn xóa sản phẩm "${name}" vào thùng rác?`)) {
       try {
@@ -456,8 +494,8 @@ export const Products: React.FC = () => {
           prev.map((p) => (p.id === id ? { ...p, is_deleted: true, isDeleted: true } : p))
         );
         toast.success(`Đã xóa mềm sản phẩm "${name}" thành công!`);
-      } catch (err) {
-        toast.error('Không thể xóa sản phẩm khỏi máy chủ.');
+      } catch {
+        toast.error('Không thể xóa sản phẩm trên máy chủ.');
       }
     }
   };
@@ -602,7 +640,14 @@ export const Products: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 text-sm">
-              {filteredProducts.map((product) => {
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-zinc-500">
+                    <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-lime-400 border-t-transparent mb-2" />
+                    <p className="text-xs font-mono">Đang tải danh sách sản phẩm từ máy chủ...</p>
+                  </td>
+                </tr>
+              ) : filteredProducts.map((product) => {
                 const isLowStock = product.stock > 0 && product.stock < 10;
                 const isOutOfStock = product.stock === 0;
                 const isCurrentlyActive = product.isActive !== false && product.status !== 'inactive';

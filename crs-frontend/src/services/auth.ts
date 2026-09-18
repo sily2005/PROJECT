@@ -1,5 +1,5 @@
 import api from './api.js'
-import type { Address, User, Customer, Order } from '../types'
+import type { Address, User } from '../types'
 
 export function mapDbAddress(raw: Record<string, any>): Address {
   return {
@@ -147,63 +147,14 @@ export async function updateProfile(data: Partial<User>): Promise<User> {
   return response.data?.data ?? response.data
 }
 
-/** Chuyển đổi dữ liệu User từ Auth-service thành Customer của Frontend */
-export function mapBackendCustomer(raw: Record<string, any>, ordersList: Order[] = []): Customer {
-  const userId = raw.id
-  const email = String(raw.email ?? '').trim()
-  const phone = String(raw.phone ?? raw.phone_number ?? '').trim()
-
-  // Tìm đơn hàng liên kết để tính tổng chi tiêu và số đơn
-  const customerOrders = ordersList.filter(o => {
-    if (o.userId && Number(o.userId) === Number(userId)) return true
-    if (email && o.customer?.email && String(o.customer.email).toLowerCase() === email.toLowerCase()) return true
-    if (email && o.userEmail && String(o.userEmail).toLowerCase() === email.toLowerCase()) return true
-    if (phone && o.customer?.phone && String(o.customer.phone) === phone) return true
-    return false
-  })
-
-  const ordersCount = raw.orders_count !== undefined 
-    ? Number(raw.orders_count) 
-    : customerOrders.length
-
-  const totalSpent = raw.total_spent !== undefined
-    ? Number(raw.total_spent)
-    : customerOrders
-        .filter(o => o.status !== 'cancelled')
-        .reduce((sum, o) => sum + (Number(o.total) || 0), 0)
-
-  let joinDate = raw.joinDate
-  if (!joinDate && raw.created_at) {
-    joinDate = new Date(raw.created_at).toLocaleDateString('vi-VN')
-  }
-
-  const isActive = raw.is_active !== undefined ? Boolean(raw.is_active) : (raw.status !== 'blocked')
-
-  return {
-    id: raw.id,
-    name: String(raw.name ?? 'Khách hàng'),
-    email,
-    phone,
-    avatar: raw.avatar,
-    address: raw.address || 'TP. Hồ Chí Minh',
-    joinDate: joinDate || '15/01/2025',
-    tier: raw.tier || 'Thành viên',
-    ordersCount,
-    totalSpent,
-    status: isActive ? 'active' : 'blocked',
-    createdAt: raw.created_at,
-  }
+export async function fetchUsers(params: Record<string, any> = {}) {
+  const response = await api.get('/users', { params })
+  return response.data
 }
 
-/** Admin: Lấy danh sách users từ auth-service */
-export async function fetchAdminUsers(params: Record<string, string | number> = {}): Promise<any[]> {
-  const response = await api.get('/auth/admin/users', { params })
-  const list = response.data?.data ?? response.data ?? []
-  return Array.isArray(list) ? list : []
-}
-
-/** Admin: Khóa hoặc mở khóa tài khoản người dùng */
-export async function toggleUserStatus(id: number | string): Promise<{ id: number | string; status: 'active' | 'blocked' }> {
-  const response = await api.patch(`/auth/admin/users/${id}/toggle-status`)
+export async function toggleUserStatus(id: string | number, isActive?: boolean) {
+  const payload = isActive !== undefined ? { is_active: isActive } : {}
+  const response = await api.patch(`/users/${id}/status`, payload)
   return response.data?.data ?? response.data
 }
+

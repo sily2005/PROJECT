@@ -70,12 +70,21 @@ export async function fetchAdminOrders(params?: { status?: string; search?: stri
   return response.data?.data ?? response.data
 }
 
-export async function fetchOrderStats(): Promise<{ total: number; pending: number; shipping: number; delivered: number; cancelled: number }> {
+export interface OrderStats {
+  total: number
+  revenue?: number
+  pending: number
+  shipping: number
+  delivered: number
+  cancelled: number
+}
+
+export async function fetchOrderStats(): Promise<OrderStats> {
   try {
     const response = await api.get('/orders/stats')
-    return response.data?.data ?? { total: 0, pending: 0, shipping: 0, delivered: 0, cancelled: 0 }
+    return response.data?.data ?? { total: 0, revenue: 0, pending: 0, shipping: 0, delivered: 0, cancelled: 0 }
   } catch {
-    return { total: 0, pending: 0, shipping: 0, delivered: 0, cancelled: 0 }
+    return { total: 0, revenue: 0, pending: 0, shipping: 0, delivered: 0, cancelled: 0 }
   }
 }
 

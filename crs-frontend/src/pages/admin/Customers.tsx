@@ -7,85 +7,102 @@ import {
   MapPin, 
   UserCheck, 
   UserX, 
-  X, 
-  ShoppingBag, 
-  Clock, 
-  CheckCircle2, 
-  Truck, 
-  XCircle, 
+  X,
+  ShoppingBag,
+  Clock,
+  CheckCircle2,
+  Truck,
+  XCircle,
   Package
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { fetchAdminUsers, toggleUserStatus, mapBackendCustomer } from '../../services/auth';
+import { fetchUsers, toggleUserStatus } from '../../services/auth';
 import { fetchAdminOrders, mapBackendOrder } from '../../services/orders';
 import type { Customer, Order } from '../../types';
+
+function mapUserToCustomer(user: any, userOrders: Order[]): Customer {
+  const userOrderList = userOrders.filter(
+    (o) => (o.userId && Number(o.userId) === Number(user.id)) ||
+           (o.customer?.phone && o.customer.phone === (user.phone_number || user.phone)) ||
+           (o.customer?.email && user.email && o.customer.email.toLowerCase() === user.email.toLowerCase()) ||
+           (o.userEmail && user.email && o.userEmail.toLowerCase() === user.email.toLowerCase())
+  );
+  const completedOrders = userOrderList.filter(
+    (o) => (o.status === 'delivered' || o.status === 'paid' || o.paymentStatus === 'paid') && o.status !== 'cancelled'
+  );
+  const totalSpent = completedOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const defaultAddr = user.addresses?.find((a: any) => a.is_default || a.isDefault) || user.addresses?.[0];
+  const addrStr = defaultAddr 
+    ? `${defaultAddr.street_address || defaultAddr.street || ''}, ${defaultAddr.ward || ''}, ${defaultAddr.district || ''}, ${defaultAddr.province || ''}`.replace(/^,\s*|,\s*$/g, '')
+    : '';
+
+  const joinDateFormatted = user.created_at ? new Date(user.created_at).toLocaleDateString('vi-VN') : 'Mới tham gia';
+
+  return {
+    id: user.id,
+    name: user.name || 'Khách hàng',
+    email: user.email || '',
+    phone: user.phone_number || user.phone || 'Chưa cập nhật',
+    address: addrStr || 'Chưa cập nhật địa chỉ',
+    status: user.is_active !== false ? 'active' : 'blocked',
+    avatar: user.avatar || '',
+    ordersCount: userOrderList.length,
+    totalSpent: totalSpent,
+    joinDate: joinDateFormatted,
+    registeredAt: joinDateFormatted,
+    createdAt: user.created_at,
+  };
+}
 
 export const Customers: React.FC = () => {
   const [customersList, setCustomersList] = useState<Customer[]>([]);
   const [ordersList, setOrdersList] = useState<Order[]>([]);
-  const [, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
-  // Load real customers and orders from API
-  useEffect(() => {
-    let isMounted = true;
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [usersRes, ordersRes] = await Promise.all([
+        fetchUsers({ per_page: 100 }),
+        fetchAdminOrders({ per_page: 100 }).catch(() => [])
+      ]);
 
-    async function loadData() {
-      setIsLoading(true);
-      try {
-        const [ordersRes, usersRes] = await Promise.allSettled([
-          fetchAdminOrders({ per_page: 500 }),
-          fetchAdminUsers(),
-        ]);
+      const uList = Array.isArray(usersRes) ? usersRes : (usersRes?.data ?? []);
+      const oRaw = Array.isArray(ordersRes) ? ordersRes : (ordersRes?.data ?? []);
+      const oList = oRaw.map(mapBackendOrder);
 
-        let loadedOrders: Order[] = [];
-        if (ordersRes.status === 'fulfilled') {
-          const rawOrders = ordersRes.value?.data ?? ordersRes.value ?? [];
-          if (Array.isArray(rawOrders)) {
-            loadedOrders = rawOrders.map(mapBackendOrder);
-            if (isMounted) setOrdersList(loadedOrders);
-          }
-        }
-
-        if (usersRes.status === 'fulfilled' && isMounted) {
-          const rawUsers = usersRes.value ?? [];
-          if (Array.isArray(rawUsers)) {
-            const mappedCustomers = rawUsers.map((u: any) => mapBackendCustomer(u, loadedOrders));
-            setCustomersList(mappedCustomers);
-          }
-        }
-      } catch (err) {
-        console.error('Lỗi khi tải dữ liệu khách hàng:', err);
-        toast.error('Không thể tải danh sách khách hàng từ hệ thống.');
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
+      setOrdersList(oList);
+      setCustomersList(uList.map((u: any) => mapUserToCustomer(u, oList)));
+    } catch (err) {
+      console.error('Lỗi tải danh sách khách hàng:', err);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    loadData();
-
-    return () => {
-      isMounted = false;
-    };
+  useEffect(() => {
+    void loadData();
   }, []);
 
-  // Toggle Account Status (Active / Blocked) via API
+  // Toggle Account Status (Active / Blocked) in Database
   const handleToggleStatus = async (id: string | number) => {
+    const current = customersList.find((c) => String(c.id) === String(id));
+    if (!current) return;
+    const nextStatus = current.status === 'active' ? 'blocked' : 'active';
     try {
-      const res = await toggleUserStatus(id);
-      const nextStatus = res.status || 'active';
-      const targetName = customersList.find((c) => String(c.id) === String(id))?.name || 'người dùng';
+      await toggleUserStatus(id, nextStatus === 'active');
       toast.info(
-        `${nextStatus === 'active' ? 'Đã mở khóa' : 'Đã tạm khóa'} tài khoản "${targetName}"`
+        `${nextStatus === 'active' ? 'Đã mở khóa' : 'Đã tạm khóa'} tài khoản "${current.name}"`
       );
       setCustomersList((prev) =>
         prev.map((c) => {
           if (String(c.id) === String(id)) {
             const updated = { ...c, status: nextStatus as 'active' | 'blocked' };
-            if (selectedCustomer && String(selectedCustomer.id) === String(id)) {
+            if (selectedCustomer && selectedCustomer.id === id) {
               setSelectedCustomer(updated);
             }
             return updated;
@@ -93,8 +110,8 @@ export const Customers: React.FC = () => {
           return c;
         })
       );
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Không thể thay đổi trạng thái tài khoản.');
+    } catch {
+      toast.error('Không thể cập nhật trạng thái tài khoản trên máy chủ.');
     }
   };
 
@@ -224,7 +241,14 @@ export const Customers: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60 text-sm">
-              {filteredCustomers.map((customer) => {
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-zinc-500">
+                    <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-lime-400 border-t-transparent mb-2" />
+                    <p className="text-xs font-mono">Đang tải dữ liệu từ máy chủ...</p>
+                  </td>
+                </tr>
+              ) : filteredCustomers.map((customer) => {
                 const isBlocked = customer.status === 'blocked';
 
                 return (

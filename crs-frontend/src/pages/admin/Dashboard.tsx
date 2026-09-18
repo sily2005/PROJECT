@@ -9,15 +9,14 @@ import {
   DollarSign, 
   Plus, 
   TicketPercent, 
-  QrCode, 
+  Store, 
   Sparkles, 
   Layers, 
   ArrowRight
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
-import { fetchAdminOrders, fetchOrderStats, mapBackendOrder } from '../../services/orders';
+import { fetchAdminOrders, fetchOrderStats, mapBackendOrder, type OrderStats } from '../../services/orders';
 import { fetchProducts } from '../../services/catalog';
-import { fetchAdminUsers } from '../../services/auth';
+import { fetchUsers } from '../../services/auth';
 import type { Order, Product } from '../../types';
 
 // Helper to safely parse order date strings
@@ -35,95 +34,75 @@ const parseOrderDate = (dateStr: string): Date => {
       return new Date(year, month, day, hours, minutes);
     }
   }
-  const d = new Date(dateStr);
-  return isNaN(d.getTime()) ? new Date() : d;
+  const parsed = new Date(dateStr);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
 };
 
 export const Dashboard: React.FC = () => {
-  const { orders: contextOrders } = useApp();
   const [timeRange, setTimeRange] = useState<'7days' | '30days' | '12months'>('7days');
   const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
 
-  // Real data states from APIs
-  const [backendOrders, setBackendOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [productsList, setProductsList] = useState<Product[]>([]);
-  const [customersList, setCustomersList] = useState<any[]>([]);
-  const [statsKpi, setStatsKpi] = useState<{ total: number; pending: number; shipping: number; delivered: number; cancelled: number } | null>(null);
+  const [customersCount, setCustomersCount] = useState<number>(0);
+  const [orderStats, setOrderStats] = useState<OrderStats>({
+    total: 0,
+    revenue: 0,
+    pending: 0,
+    shipping: 0,
+    delivered: 0,
+    cancelled: 0,
+  });
 
   useEffect(() => {
-    let isMounted = true;
+    let active = true;
 
-    async function loadDashboardData() {
-      try {
-        const [ordersRes, statsRes, prodsRes, usersRes] = await Promise.allSettled([
-          fetchAdminOrders({ per_page: 50 }),
-          fetchOrderStats(),
-          fetchProducts(),
-          fetchAdminUsers(),
-        ]);
+    Promise.all([
+      fetchAdminOrders({ per_page: 100 }).catch(() => []),
+      fetchOrderStats().catch(() => ({ total: 0, pending: 0, shipping: 0, delivered: 0, cancelled: 0 })),
+      fetchProducts({ per_page: 100 }).catch(() => []),
+      fetchUsers({ per_page: 1 }).catch(() => ({ pagination: { total: 0 } }))
+    ]).then(([ordersRes, statsRes, prodsRes, usersRes]) => {
+      if (!active) return;
 
-        if (!isMounted) return;
+      const oRaw = Array.isArray(ordersRes) ? ordersRes : (ordersRes?.data ?? []);
+      setOrders(oRaw.map(mapBackendOrder));
+      setOrderStats(statsRes);
 
-        if (ordersRes.status === 'fulfilled') {
-          const rawList = ordersRes.value?.data ?? ordersRes.value ?? [];
-          if (Array.isArray(rawList)) {
-            setBackendOrders(rawList.map(mapBackendOrder));
-          }
-        }
+      const pRaw = Array.isArray(prodsRes) ? prodsRes : (prodsRes?.data ?? []);
+      setProductsList(pRaw);
 
-        if (statsRes.status === 'fulfilled' && statsRes.value) {
-          setStatsKpi(statsRes.value);
-        }
-
-        if (prodsRes.status === 'fulfilled' && Array.isArray(prodsRes.value)) {
-          setProductsList(prodsRes.value);
-        }
-
-        if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
-          setCustomersList(usersRes.value);
-        }
-      } catch (err) {
-        console.error('Error loading dashboard data:', err);
-      }
-    }
-
-    loadDashboardData();
+      const uTotal = usersRes?.pagination?.total ?? (Array.isArray(usersRes) ? usersRes.length : (usersRes?.data?.length ?? 0));
+      setCustomersCount(uTotal);
+    });
 
     return () => {
-      isMounted = false;
+      active = false;
     };
   }, []);
 
-  // 1. Combine context orders with real backend orders
-  const orders: Order[] = useMemo(() => {
-    const combined = [...(contextOrders || [])];
-    backendOrders.forEach((bo) => {
-      if (!combined.some((o) => String(o.id) === String(bo.id))) {
-        combined.push(bo);
-      }
-    });
-    return combined;
-  }, [contextOrders, backendOrders]);
-
   // 4. Dynamic KPI Calculations
-  // Total Revenue: Sum of total for orders with status !== 'cancelled'
-  const validOrders = useMemo(() => orders.filter((o) => o.status !== 'cancelled'), [orders]);
+  // Total Revenue: Chỉ tính các đơn ĐÃ GIAO THÀNH CÔNG / ĐÃ THANH TOÁN (delivered, paid)
+  const completedOrders = useMemo(
+    () => orders.filter((o) => (o.status === 'delivered' || o.status === 'paid' || o.paymentStatus === 'paid') && o.status !== 'cancelled'),
+    [orders]
+  );
   const totalRevenue = useMemo(
-    () => validOrders.reduce((sum, o) => sum + (o.total || 0), 0),
-    [validOrders]
+    () => (typeof orderStats.revenue === 'number' && orderStats.revenue > 0)
+      ? orderStats.revenue
+      : completedOrders.reduce((sum, o) => sum + (o.total || 0), 0),
+    [orderStats.revenue, completedOrders]
   );
 
-  // Total Orders & Status Breakdowns
-  const totalOrdersCount = statsKpi ? statsKpi.total : orders.length;
-  const pendingOrdersCount = statsKpi ? statsKpi.pending : orders.filter((o) => o.status === 'pending').length;
-  const shippingOrdersCount = statsKpi ? statsKpi.shipping : orders.filter((o) => o.status === 'shipping').length;
-  const deliveredOrdersCount = statsKpi ? statsKpi.delivered : orders.filter((o) => o.status === 'delivered' || (o as any).status === 'paid').length;
-  const cancelledOrdersCount = statsKpi ? statsKpi.cancelled : orders.filter((o) => o.status === 'cancelled').length;
+  // Total Orders & Status Breakdowns from Real Database Query
+  const totalOrdersCount = orderStats.total || orders.length;
+  const pendingOrdersCount = orderStats.pending;
+  const shippingOrdersCount = orderStats.shipping;
+  const deliveredOrdersCount = orderStats.delivered;
+  const cancelledOrdersCount = orderStats.cancelled;
 
-  // Total Customers: Accounts with role === 'user' (or active customer profiles)
-  const totalCustomersCount = useMemo(() => {
-    return customersList.filter((c) => (c as any).role !== 'admin' && c.status !== 'blocked').length;
-  }, [customersList]);
+  // Total Customers
+  const totalCustomersCount = customersCount;
 
   // Products & Total Inventory
   const totalSkuCount = productsList.length;
@@ -160,7 +139,7 @@ export const Dashboard: React.FC = () => {
         let dayRevenue = 0;
         let dayOrderCount = 0;
 
-        validOrders.forEach((o) => {
+        completedOrders.forEach((o) => {
           const od = parseOrderDate(o.date);
           if (
             od.getDate() === d.getDate() &&
@@ -182,7 +161,7 @@ export const Dashboard: React.FC = () => {
         { label: 'Tuần 3 (15-21)', startDay: 15, endDay: 21, revenue: 0, orders: 0 },
         { label: 'Tuần 4 (22-31)', startDay: 22, endDay: 31, revenue: 0, orders: 0 },
       ];
-      validOrders.forEach((o) => {
+      completedOrders.forEach((o) => {
         const od = parseOrderDate(o.date);
         const d = od.getDate();
         for (const w of weeks) {
@@ -200,7 +179,7 @@ export const Dashboard: React.FC = () => {
         revenue: 0,
         orders: 0,
       }));
-      validOrders.forEach((o) => {
+      completedOrders.forEach((o) => {
         const od = parseOrderDate(o.date);
         const m = od.getMonth();
         if (m >= 0 && m < 12) {
@@ -210,7 +189,7 @@ export const Dashboard: React.FC = () => {
       });
       return months;
     }
-  }, [timeRange, orders, validOrders]);
+  }, [timeRange, orders, completedOrders]);
 
   const maxRevenue = useMemo(() => {
     const max = Math.max(...chartData.map((d) => d.revenue));
@@ -224,11 +203,11 @@ export const Dashboard: React.FC = () => {
       .slice(0, 6);
   }, [orders]);
 
-  // 7. Top Selling Products: Aggregated from itemsList of non-cancelled orders
+  // 7. Top Selling Products: Aggregated from itemsList of delivered/completed orders
   const topSellingProducts = useMemo(() => {
     const salesMap = new Map<number | string, { unitsSold: number; revenue: number; item: any }>();
 
-    validOrders.forEach((order) => {
+    completedOrders.forEach((order) => {
       order.itemsList?.forEach((item) => {
         const key = item.id || item.name;
         const existing = salesMap.get(key);
@@ -255,7 +234,7 @@ export const Dashboard: React.FC = () => {
         return {
           id: item.id || idx,
           name: catalogProd.name || item.name,
-          image: catalogProd.image || item.image || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600&q=80',
+          image: catalogProd.image || item.image || (productsList[0]?.image ?? 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=300&q=80'),
           price: catalogProd.price || item.price || 0,
           unitsSold,
           revenueTotal: revenue,
@@ -274,7 +253,7 @@ export const Dashboard: React.FC = () => {
       revenueTotal: p.price * Math.max(10, 80 - idx * 18),
       growth: `+${20 - idx * 4}%`,
     }));
-  }, [validOrders, productsList]);
+  }, [completedOrders, productsList]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-300">
@@ -315,8 +294,8 @@ export const Dashboard: React.FC = () => {
             to="/admin/settings"
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-white hover:border-lime-500/50 transition-all"
           >
-            <QrCode className="w-4 h-4 text-emerald-400" />
-            <span>VietQR Shop</span>
+            <Store className="w-4 h-4 text-emerald-400" />
+            <span>Cài đặt Shop</span>
           </Link>
         </div>
       </div>
@@ -340,7 +319,7 @@ export const Dashboard: React.FC = () => {
               <span className="inline-flex items-center gap-1 text-xs font-mono font-bold text-lime-400 bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/20">
                 <TrendingUp className="w-3 h-3" /> +14.2%
               </span>
-              <span className="text-[11px] text-zinc-400">Doanh thu hợp lệ</span>
+              <span className="text-[11px] text-zinc-400">Doanh thu đơn đã giao</span>
             </div>
           </div>
           {/* Mini Sparkline SVG */}

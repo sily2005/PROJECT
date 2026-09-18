@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from '../components/Header';
 import { CartDrawer } from '../components/CartDrawer';
 import { 
@@ -6,16 +6,15 @@ import {
   Mail, 
   MapPin, 
   Clock, 
-  ShieldCheck,
-  Truck,
-  RotateCcw
+  ShieldCheck, 
+  Truck, 
+  RotateCcw 
 } from 'lucide-react';
 import type { ShopSettings } from '../types';
 import { INITIAL_SHOP_SETTINGS } from '../data/adminMockData';
 
 export function ShopLayout({ children }: { children: React.ReactNode }) {
-  // Load Shop Settings from localStorage
-  const settings: ShopSettings = useMemo(() => {
+  const getStoredSettings = (): ShopSettings => {
     const stored = localStorage.getItem('crs_shop_settings');
     if (!stored) return INITIAL_SHOP_SETTINGS;
     try {
@@ -23,6 +22,20 @@ export function ShopLayout({ children }: { children: React.ReactNode }) {
     } catch {
       return INITIAL_SHOP_SETTINGS;
     }
+  };
+
+  const [settings, setSettings] = useState<ShopSettings>(getStoredSettings);
+
+  useEffect(() => {
+    const handleSettingsChange = () => {
+      setSettings(getStoredSettings());
+    };
+    window.addEventListener('shop-settings-changed', handleSettingsChange);
+    window.addEventListener('storage', handleSettingsChange);
+    return () => {
+      window.removeEventListener('shop-settings-changed', handleSettingsChange);
+      window.removeEventListener('storage', handleSettingsChange);
+    };
   }, []);
 
   return (

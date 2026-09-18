@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner'
 import { useApp } from '../../context/AppContext'
 import { AddressBookModal } from '../../components/AddressBookModal'
+import { updateProfile } from '../../services/auth'
 
 export function Profile() {
   const { user, updateUserProfile, deleteAddress, setDefaultAddress } = useApp()
@@ -36,20 +37,26 @@ export function Profile() {
   // Address Modal
   const [addressModalOpen, setAddressModalOpen] = useState(false)
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) {
       toast.error('Họ và tên không được để trống!')
       return
     }
-    updateUserProfile({
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-    })
+    try {
+      const updated = await updateProfile({
+        name: name.trim(),
+        phone: phone.trim(),
+        phone_number: phone.trim(),
+      })
+      updateUserProfile(updated)
+      toast.success('Đã lưu thay đổi thông tin cá nhân!')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể cập nhật thông tin cá nhân.')
+    }
   }
 
-  const handlePasswordChange = (e: React.FormEvent) => {
+  const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!currentPassword) {
       toast.error('Vui lòng nhập mật khẩu hiện tại!')
@@ -65,15 +72,22 @@ export function Profile() {
     }
 
     setSavingPassword(true)
-    setTimeout(() => {
-      setSavingPassword(false)
+    try {
+      await updateProfile({
+        current_password: currentPassword,
+        password: newPassword,
+      })
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
       toast.success('Đổi mật khẩu thành công! 🔐', {
         description: 'Tài khoản của bạn đã được cập nhật mật khẩu mới.',
       })
-    }, 600)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Đổi mật khẩu thất bại. Vui lòng kiểm tra lại mật khẩu hiện tại.')
+    } finally {
+      setSavingPassword(false)
+    }
   }
 
   const addresses = user?.addresses || []

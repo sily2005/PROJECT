@@ -17,20 +17,35 @@ import {
   Lock
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { 
-  INITIAL_SHOP_SETTINGS, 
-  INITIAL_BANNER_SLIDES 
-} from '../../data/adminMockData';
-import { 
-  fetchCategories, 
-  fetchBrands, 
-  fetchProducts 
-} from '../../services/catalog';
+import { fetchBanners, createBanner, updateBanner, deleteBanner } from '../../services/banners';
+import { fetchCategories, fetchBrands, fetchProducts } from '../../services/catalog';
 import type { BannerSlide, ShopSettings, CategoryItem, BrandItem, Product } from '../../types';
 
-// System default fallback items
-const DEFAULT_CATEGORY: CategoryItem = { id: 999, name: 'Khác', slug: 'khac' };
-const DEFAULT_BRAND: BrandItem = { id: 999, name: 'Khác' };
+export const DEFAULT_CATEGORY: CategoryItem = {
+  id: 999,
+  name: 'Khác',
+  description: 'Danh mục mặc định của hệ thống',
+  slug: 'khac',
+};
+
+export const DEFAULT_BRAND: BrandItem = {
+  id: 999,
+  name: 'Khác',
+  description: 'Thương hiệu mặc định của hệ thống',
+};
+
+export const INITIAL_SHOP_SETTINGS: ShopSettings = {
+  shopName: 'STRIKER SPORT PRO',
+  hotline: '1900 8899',
+  email: 'support@striker.vn',
+  address: 'Tầng 5, Tòa nhà Bitexco, Số 2 Hải Triều, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh',
+  workingHours: '08:00 - 22:00 (Tất cả các ngày trong tuần)',
+  copyright: '© 2026 STRIKER SPORT PRO. All rights reserved.',
+  bankName: 'MB',
+  bankAccountNo: '0977777777',
+  bankAccountName: 'STRIKER SPORT PRO',
+  transferSyntax: 'STR {ORDER_ID}',
+};
 
 // Helpers to identify and ensure system default items
 const isDefaultCategory = (c?: CategoryItem | null): boolean => {
@@ -86,42 +101,43 @@ export const Settings: React.FC = () => {
     }
   });
 
-  // Homepage Banners List
-  const [banners, setBanners] = useState<BannerSlide[]>(() => {
-    const stored = localStorage.getItem('crs_homepage_banners');
-    if (!stored) return INITIAL_BANNER_SLIDES;
-    try {
-      return JSON.parse(stored) as BannerSlide[];
-    } catch {
-      return INITIAL_BANNER_SLIDES;
-    }
-  });
-
-  // Categories, Brands & Products State loaded from API
+  const [banners, setBanners] = useState<BannerSlide[]>([]);
   const [categoriesList, setCategoriesList] = useState<CategoryItem[]>([DEFAULT_CATEGORY]);
   const [brandsList, setBrandsList] = useState<BrandItem[]>([DEFAULT_BRAND]);
   const [productsList, setProductsList] = useState<Product[]>([]);
 
+  // Sync Banners, Categories, Brands from Database APIs
   useEffect(() => {
-    let isMounted = true;
-    Promise.allSettled([
-      fetchCategories(),
-      fetchBrands(),
-      fetchProducts({ per_page: 100 }),
-    ]).then(([cats, brs, prods]) => {
-      if (!isMounted) return;
-      if (cats.status === 'fulfilled' && Array.isArray(cats.value) && cats.value.length > 0) {
-        setCategoriesList(ensureDefaultCategory(cats.value));
+    let active = true;
+
+    Promise.all([
+      fetchBanners().catch(() => []),
+      fetchCategories().catch(() => []),
+      fetchBrands().catch(() => []),
+      fetchProducts({ per_page: 100 }).catch(() => [])
+    ]).then(([bannersRes, catsRes, brandsRes, prodsRes]) => {
+      if (!active) return;
+
+      if (Array.isArray(bannersRes) && bannersRes.length > 0) {
+        setBanners(bannersRes);
       }
-      if (brs.status === 'fulfilled' && Array.isArray(brs.value) && brs.value.length > 0) {
-        setBrandsList(ensureDefaultBrand(brs.value));
+
+      if (Array.isArray(catsRes) && catsRes.length > 0) {
+        setCategoriesList(ensureDefaultCategory(catsRes));
       }
-      if (prods.status === 'fulfilled' && Array.isArray(prods.value)) {
-        setProductsList(prods.value);
+
+      if (Array.isArray(brandsRes) && brandsRes.length > 0) {
+        setBrandsList(ensureDefaultBrand(brandsRes));
+      }
+
+      const pList = Array.isArray(prodsRes) ? prodsRes : (prodsRes?.data ?? []);
+      if (Array.isArray(pList)) {
+        setProductsList(pList);
       }
     });
+
     return () => {
-      isMounted = false;
+      active = false;
     };
   }, []);
 
@@ -163,10 +179,11 @@ export const Settings: React.FC = () => {
     }
   };
 
-  // Persist Shop Settings
+  // Persist Settings
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem('crs_shop_settings', JSON.stringify(settings));
+    window.dispatchEvent(new CustomEvent('shop-settings-changed'));
     toast.success('Đã lưu thông tin cửa hàng thành công!');
   };
 
@@ -214,58 +231,73 @@ export const Settings: React.FC = () => {
       return;
     }
 
+    const payload = {
+      title: bannerTitle.trim(),
+      subtitle: bannerSubtitle.trim(),
+      tag: bannerTag.trim(),
+      image: bannerImage.trim() || 'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=2200&q=90',
+      link: bannerLink.trim(),
+      order: parseInt(bannerOrder, 10) || 1,
+    };
+
     if (editingBanner) {
-      setBanners((prev) =>
-        prev.map((b) =>
-          b.id === editingBanner.id
-            ? {
-                ...b,
-                title: bannerTitle.trim(),
-                subtitle: bannerSubtitle.trim(),
-                tag: bannerTag.trim(),
-                image: bannerImage.trim(),
-                link: bannerLink.trim(),
-                order: parseInt(bannerOrder, 10) || 1,
-              }
-            : b
-        )
-      );
-      toast.success('Đã cập nhật slide banner trang chủ!');
+      updateBanner(editingBanner.id, payload)
+        .then((updated) => {
+          setBanners((prev) =>
+            prev.map((b) => (b.id === editingBanner.id ? { ...b, ...payload, ...updated } : b))
+          );
+          toast.success('Đã cập nhật slide banner trang chủ!');
+          window.dispatchEvent(new Event('banners-changed'));
+        })
+        .catch(() => {
+          toast.error('Lỗi khi cập nhật banner trên máy chủ.');
+        });
     } else {
-      const newSlide: BannerSlide = {
-        id: `bn-${Date.now()}`,
-        title: bannerTitle.trim(),
-        subtitle: bannerSubtitle.trim(),
-        tag: bannerTag.trim(),
-        image: bannerImage.trim(),
-        link: bannerLink.trim(),
-        order: parseInt(bannerOrder, 10) || banners.length + 1,
-        isActive: true,
-      };
-      setBanners((prev) => [...prev, newSlide]);
-      toast.success('Đã thêm slide banner mới vào trang chủ!');
+      createBanner({ ...payload, is_active: true })
+        .then((created) => {
+          setBanners((prev) => [...prev, created]);
+          toast.success('Đã thêm slide banner mới vào trang chủ!');
+          window.dispatchEvent(new Event('banners-changed'));
+        })
+        .catch(() => {
+          toast.error('Lỗi khi tạo mới banner trên máy chủ.');
+        });
     }
 
     setBannerModalOpen(false);
   };
 
-  const handleToggleBanner = (id: string | number) => {
-    setBanners((prev) =>
-      prev.map((b) => {
-        if (String(b.id) === String(id)) {
-          const nextState = !b.isActive;
-          toast.info(`${nextState ? 'Đã bật' : 'Đã tắt'} hiển thị slide banner`);
-          return { ...b, isActive: nextState };
-        }
-        return b;
-      })
-    );
+  const handleToggleBanner = async (id: string | number) => {
+    const current = banners.find((b) => String(b.id) === String(id));
+    if (!current) return;
+    const nextState = !current.isActive;
+    try {
+      await updateBanner(id, { is_active: nextState });
+      setBanners((prev) =>
+        prev.map((b) => {
+          if (String(b.id) === String(id)) {
+            toast.info(`${nextState ? 'Đã bật' : 'Đã tắt'} hiển thị slide banner`);
+            return { ...b, isActive: nextState };
+          }
+          return b;
+        })
+      );
+      window.dispatchEvent(new Event('banners-changed'));
+    } catch {
+      toast.error('Không thể cập nhật trạng thái banner.');
+    }
   };
 
-  const handleDeleteBanner = (id: string | number) => {
+  const handleDeleteBanner = async (id: string | number) => {
     if (window.confirm('Bạn có chắc muốn xóa banner này khỏi trang chủ?')) {
-      setBanners((prev) => prev.filter((b) => String(b.id) !== String(id)));
-      toast.info('Đã xóa slide banner');
+      try {
+        await deleteBanner(id);
+        setBanners((prev) => prev.filter((b) => String(b.id) !== String(id)));
+        toast.info('Đã xóa slide banner');
+        window.dispatchEvent(new Event('banners-changed'));
+      } catch {
+        toast.error('Không thể xóa banner trên máy chủ.');
+      }
     }
   };
 

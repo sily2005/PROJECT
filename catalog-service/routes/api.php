@@ -13,3 +13,4 @@ Route::post('/products/restore-stock', [ProductController::class, 'restoreStock'
 Route::apiResource('categories', CategoryController::class);
 Route::apiResource('brands', BrandController::class);
 Route::apiResource('products', ProductController::class);
+Route::apiResource('banners', \App\Http\Controllers\BannerController::class);

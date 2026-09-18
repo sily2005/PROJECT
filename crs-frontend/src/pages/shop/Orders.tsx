@@ -7,7 +7,6 @@ import {
   CreditCard,
   MapPin,
   Package,
-  QrCode,
   RotateCcw,
   ShoppingBag,
   Star,
@@ -18,7 +17,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useApp } from '../../context/AppContext'
-import { VietQRModal } from '../../components/VietQRModal'
+import { getMomoPayUrl } from '../../services/orders'
 import { ReviewModal } from '../../components/ReviewModal'
 import type { Order, OrderStatus } from '../../types'
 
@@ -89,9 +88,25 @@ const statusConfig: Record<
 export function Orders() {
   const { orders, ordersLoading, refreshOrders, addToCart, user, cancelOrder } = useApp()
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
-  const [vietQROrder, setVietQROrder] = useState<Order | null>(null)
   const [cancelModalOrder, setCancelModalOrder] = useState<Order | null>(null)
+  const [payingOrderId, setPayingOrderId] = useState<string | number | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const handlePayMoMo = async (orderId: string | number) => {
+    try {
+      setPayingOrderId(orderId)
+      const payUrl = await getMomoPayUrl(orderId)
+      if (payUrl) {
+        window.location.href = payUrl
+      } else {
+        toast.error('Không thể khởi tạo cổng thanh toán MoMo.')
+      }
+    } catch {
+      toast.error('Lỗi kết nối cổng thanh toán MoMo.')
+    } finally {
+      setPayingOrderId(null)
+    }
+  }
 
   useEffect(() => {
     const payment = searchParams.get('payment') || searchParams.get('status')
@@ -257,7 +272,7 @@ export function Orders() {
             {filteredOrders.map((order) => {
               const config = statusConfig[order.status] || statusConfig.pending
               const needsPayment =
-                order.paymentMethod === 'bank_transfer' &&
+                order.paymentMethod === 'momo' &&
                 order.paymentStatus !== 'paid' &&
                 order.status !== 'cancelled'
               const isDelivered =
@@ -306,24 +321,24 @@ export function Orders() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2.5">
-                      {order.paymentMethod === 'bank_transfer' && (
+                      {order.paymentMethod === 'momo' && (
                         <span
                           className={`rounded-full px-2.5 py-0.5 text-[11px] font-mono font-bold ${
                             order.paymentStatus === 'paid'
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              : 'bg-pink-500/20 text-pink-300 border border-pink-500/30'
                           }`}
                         >
                           {order.paymentStatus === 'paid'
-                            ? '● Đã thanh toán VietQR'
-                            : '○ Chờ chuyển khoản VietQR'}
+                            ? '● Đã thanh toán MoMo'
+                            : '○ Chờ thanh toán MoMo'}
                         </span>
                       )}
                       {order.paymentMethod === 'cod' && (
                         <span className="rounded-full px-2.5 py-0.5 text-[11px] font-mono font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
                           {order.paymentStatus === 'paid'
                             ? '● Đã thanh toán COD'
-                            : '○ COD - Chưa thanh toán'}
+                            : '○ COD - Thanh toán khi nhận hàng'}
                         </span>
                       )}
 
@@ -418,13 +433,16 @@ export function Orders() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      {/* Button Thanh toán ngay if VietQR pending */}
+                      {/* Button Thanh toán MoMo if pending */}
                       {needsPayment && (
                         <button
-                          onClick={() => setVietQROrder(order)}
-                          className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-lime-400 to-emerald-400 px-4 py-2.5 font-black text-slate-950 hover:brightness-110 transition shadow-lg shadow-lime-400/20 cursor-pointer"
+                          type="button"
+                          onClick={() => handlePayMoMo(order.id)}
+                          disabled={payingOrderId === order.id}
+                          className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 px-4 py-2.5 font-black text-white hover:brightness-110 transition shadow-lg shadow-pink-500/20 cursor-pointer disabled:opacity-50"
                         >
-                          <QrCode size={15} /> Thanh toán ngay
+                          <CreditCard size={15} />{' '}
+                          {payingOrderId === order.id ? 'Đang kết nối...' : 'Thanh toán MoMo'}
                         </button>
                       )}
 
@@ -615,11 +633,9 @@ export function Orders() {
                       <p className="text-slate-300">
                         Phương thức:{' '}
                         <b className="text-white uppercase">
-                          {selectedOrder.paymentMethod === 'bank_transfer'
-                            ? 'VietQR MBBank'
-                            : selectedOrder.paymentMethod === 'cod'
-                            ? 'Thanh toán khi nhận hàng (COD)'
-                            : selectedOrder.paymentMethod}
+                          {selectedOrder.paymentMethod === 'momo'
+                            ? 'Ví điện tử MoMo'
+                            : 'Thanh toán khi nhận hàng (COD)'}
                         </b>
                       </p>
                       <p className="text-slate-300">
@@ -773,17 +789,17 @@ export function Orders() {
                         </button>
                       )}
 
-                      {selectedOrder.paymentMethod === 'bank_transfer' &&
+                      {selectedOrder.paymentMethod === 'momo' &&
                         selectedOrder.paymentStatus !== 'paid' &&
                         selectedOrder.status !== 'cancelled' && (
                           <button
-                            onClick={() => {
-                              setVietQROrder(selectedOrder)
-                              setSelectedOrder(null)
-                            }}
-                            className="flex items-center gap-1.5 rounded-xl bg-emerald-500 px-5 py-2.5 text-xs font-black text-white hover:bg-emerald-400"
+                            type="button"
+                            onClick={() => handlePayMoMo(selectedOrder.id)}
+                            disabled={payingOrderId === selectedOrder.id}
+                            className="flex items-center gap-1.5 rounded-xl bg-pink-500 px-5 py-2.5 text-xs font-black text-white hover:bg-pink-600 transition shadow-md shadow-pink-500/20 cursor-pointer disabled:opacity-50"
                           >
-                            <CreditCard size={14} /> Thanh toán VietQR
+                            <CreditCard size={14} />{' '}
+                            {payingOrderId === selectedOrder.id ? 'Đang kết nối...' : 'Thanh toán MoMo'}
                           </button>
                         )}
 
@@ -848,14 +864,6 @@ export function Orders() {
               </div>
             )}
           </AnimatePresence>
-
-          {/* VietQR Modal */}
-          <VietQRModal
-            isOpen={Boolean(vietQROrder)}
-            order={vietQROrder}
-            onClose={() => setVietQROrder(null)}
-            onSuccess={() => setVietQROrder(null)}
-          />
 
           {/* Review Modal per Product Item */}
           {reviewTarget && (

@@ -252,6 +252,131 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Update user profile information.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $user = auth('api')->user();
+        if (!$user && $request->filled('user_id')) {
+            $user = User::find($request->input('user_id'));
+        }
+
+        if (!$user) {
+            abort(401, 'Vui lòng đăng nhập để cập nhật hồ sơ.');
+        }
+
+        $validated = $request->validate([
+            'name' => ['sometimes', 'string', 'max:100'],
+            'phone' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'phone_number' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'avatar' => ['sometimes', 'nullable', 'string'],
+            'current_password' => ['sometimes', 'nullable', 'string'],
+            'password' => ['sometimes', 'nullable', 'string', 'min:6'],
+        ]);
+
+        if (!empty($validated['name'])) {
+            $user->name = trim($validated['name']);
+        }
+        if (isset($validated['phone']) || isset($validated['phone_number'])) {
+            $user->phone_number = $validated['phone'] ?? $validated['phone_number'];
+        }
+        if (isset($validated['avatar'])) {
+            $user->avatar = $validated['avatar'];
+        }
+
+        if (!empty($validated['password'])) {
+            if (!empty($validated['current_password']) && !Hash::check($validated['current_password'], $user->password)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Mật khẩu hiện tại không chính xác.',
+                    'errors' => ['current_password' => ['Mật khẩu hiện tại không khớp.']],
+                ], 422);
+            }
+            $user->password = Hash::make($validated['password']);
+        }
+
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cập nhật thông tin cá nhân thành công.',
+            'data' => $user->fresh()->load('addresses'),
+            'user' => $user->fresh()->load('addresses'),
+            'errors' => null,
+        ]);
+    }
+
+    /**
+     * Get all users for Admin management.
+     */
+    public function getUsers(Request $request): JsonResponse
+    {
+        $search = $request->input('search');
+        $status = $request->input('status');
+        $role = $request->input('role');
+        $perPage = (int) $request->input('per_page', 20);
+
+        $query = User::with('addresses')
+            ->when($search, function ($q, $s) {
+                $q->where(function ($sub) use ($s) {
+                    $sub->where('name', 'like', "%{$s}%")
+                        ->orWhere('email', 'like', "%{$s}%")
+                        ->orWhere('phone_number', 'like', "%{$s}%");
+                });
+            })
+            ->when($status, function ($q, $st) {
+                if ($st === 'active') $q->where('is_active', true);
+                if ($st === 'blocked' || $st === 'inactive') $q->where('is_active', false);
+            })
+            ->when($role && $role !== 'all', fn ($q, $r) => $q->where('role', $r))
+            ->latest();
+
+        $users = $query->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Lấy danh sách người dùng thành công.',
+            'data' => $users->items(),
+            'pagination' => [
+                'current_page' => $users->currentPage(),
+                'per_page' => $users->perPage(),
+                'total' => $users->total(),
+                'last_page' => $users->lastPage(),
+            ],
+            'errors' => null,
+        ]);
+    }
+
+    /**
+     * Toggle user status (active / blocked).
+     */
+    public function updateUserStatus(Request $request, User $user): JsonResponse
+    {
+        $validated = $request->validate([
+            'is_active' => ['sometimes', 'boolean'],
+            'status' => ['sometimes', 'string', 'in:active,blocked,inactive'],
+        ]);
+
+        if (isset($validated['is_active'])) {
+            $user->is_active = (bool) $validated['is_active'];
+        } elseif (isset($validated['status'])) {
+            $user->is_active = $validated['status'] === 'active';
+        } else {
+            $user->is_active = !$user->is_active;
+        }
+
+        $user->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Cập nhật trạng thái tài khoản thành công.',
+            'data' => $user->fresh(),
+            'errors' => null,
+        ]);
+    }
+
+
     private function parseIdentifier(string $identifier): array
     {
         $identifier = trim($identifier);
@@ -299,108 +424,5 @@ class AuthController extends Controller
             ],
             'errors' => null,
         ], $status);
-    }
-
-    /**
-     * Admin: List users / customers with addresses and search.
-     *
-     * @group Admin User Management
-     */
-    public function adminUsers(Request $request): JsonResponse
-    {
-        $search = trim((string) $request->query('search', ''));
-        $role = $request->query('role');
-        $status = $request->query('status'); // 'active' or 'blocked'
-
-        $query = User::with('addresses');
-
-        if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('phone_number', 'like', "%{$search}%");
-            });
-        }
-
-        if ($role) {
-            $query->where('role', $role);
-        }
-
-        if ($status === 'active') {
-            $query->where('is_active', true);
-        } elseif ($status === 'blocked') {
-            $query->where('is_active', false);
-        }
-
-        $users = $query->latest()->get()->map(function (User $user) {
-            $defaultAddress = $user->addresses->firstWhere('is_default', true) ?? $user->addresses->first();
-            $fullAddress = '';
-            if ($defaultAddress) {
-                $parts = array_filter([
-                    $defaultAddress->street_address,
-                    $defaultAddress->ward,
-                    $defaultAddress->district,
-                    $defaultAddress->province,
-                ]);
-                $fullAddress = implode(', ', $parts);
-            }
-
-            return [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone_number ?? '',
-                'phone_number' => $user->phone_number,
-                'role' => $user->role,
-                'avatar' => $user->avatar,
-                'is_active' => (bool) $user->is_active,
-                'status' => $user->is_active ? 'active' : 'blocked',
-                'address' => $fullAddress,
-                'joinDate' => $user->created_at ? $user->created_at->format('d/m/Y') : '',
-                'created_at' => $user->created_at ? $user->created_at->toISOString() : null,
-                'addresses' => $user->addresses,
-            ];
-        });
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Lấy danh sách người dùng thành công.',
-            'data' => $users,
-            'errors' => null,
-        ]);
-    }
-
-    /**
-     * Admin: Toggle user active/blocked status.
-     *
-     * @group Admin User Management
-     */
-    public function adminToggleStatus(Request $request, int|string $id): JsonResponse
-    {
-        $user = User::find($id);
-
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Không tìm thấy người dùng.',
-                'data' => null,
-                'errors' => ['user' => ['Tài khoản không tồn tại.']],
-            ], 404);
-        }
-
-        $user->is_active = !$user->is_active;
-        $user->save();
-
-        return response()->json([
-            'success' => true,
-            'message' => $user->is_active ? 'Đã mở khóa tài khoản.' : 'Đã tạm khóa tài khoản.',
-            'data' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'is_active' => (bool) $user->is_active,
-                'status' => $user->is_active ? 'active' : 'blocked',
-            ],
-            'errors' => null,
-        ]);
     }
 }
